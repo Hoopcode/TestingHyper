@@ -1,0 +1,724 @@
+{
+  "name": "Master people enrichment API",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "basicAuth",
+        "httpMethod": "POST",
+        "path": "2ba53c69-8662-4841-b83b-c8d6d195e79a",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "78a8823b-bd2d-44d5-98ea-b119a2f25ae1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -2360,
+        -20
+      ],
+      "webhookId": "2ba53c69-8662-4841-b83b-c8d6d195e79a",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "15",
+          "name": "Hyperscale API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://nubela.co/proxycurl/api/v2/linkedin",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fallback_to_cache",
+              "value": "on-error"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json.linkedin_url }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer t5iMBImoX6aSd91jBbkZFg"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7a4fbd21-08a3-4ef0-8cda-623f0e8f9332",
+      "name": "Proxycurl for person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        -1860,
+        -20
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://nubela.co/proxycurl/api/linkedin/company",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.position_to_check }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer t5iMBImoX6aSd91jBbkZFg"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "85064607-b906-4ac4-86b0-6af2e91a6046",
+      "name": "Proxycurl for company",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        -1160,
+        -20
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the \"id\" and \"LinkedIn URL\" data from the \"Unbundle into array\" node\nconst unbundleData = $items(\"Split items\").map(item => item.json);\n\n// Function to process each item\nfunction processItem(item, index) {\n  // Extract the \"experiences\" array\n  const experiences = item.experiences || [];\n\n  // Get the \"id\" and \"LinkedIn URL\" for the current item\n  const id = unbundleData[index].id;\n  const linkedinURL = unbundleData[index]['linkedin_url'];\n\n  // Filter experiences with a blank \"ends_at\" field\n  const currentPositions = experiences\n    .filter(exp => !exp.ends_at)\n    .map(exp => exp.company_linkedin_profile_url);\n\n  // Calculate the number of non-empty fields and number of jobs\n  const numberOfFields = Object.values(item).filter(value => value !== null && value !== '').length + 3; // Add 3 for the new columns\n  const numberOfJobs = currentPositions.length;\n\n  // Determine the most recent position\n  let mostRecentPosition = '';\n  if (currentPositions.length === 0) {\n    const recentExperience = experiences.find(exp => exp.ends_at);\n    mostRecentPosition = recentExperience ? recentExperience.company_linkedin_profile_url : '';\n  }\n\n  // Prepare the output data\n  const outputData = {\n    id,\n    'linkedin_url': linkedinURL,\n    current_positions: currentPositions,\n    most_recent_position: mostRecentPosition,\n    number_of_fields: numberOfFields,\n    number_of_jobs: numberOfJobs,\n    ...item\n  };\n\n  return outputData;\n}\n\n// Process all items from the previous node\nconst outputItems = items.map((inputItem, index) => ({\n  json: processItem(inputItem.json, index)\n}));\n\n// Return the output items with the new columns added\nreturn outputItems;"
+      },
+      "id": "5cef823d-b2e9-4499-8d60-3f54d18f4a15",
+      "name": "Find current positions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        -1600,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Function to process each item\nfunction processItem(item) {\n  const { current_positions, most_recent_position } = item;\n\n  // If most_recent_position is not blank, use it as the position_to_check\n  if (most_recent_position !== '') {\n    return [\n      {\n        position_to_check: most_recent_position,\n        ...item\n      }\n    ];\n  }\n\n  // If current_positions is not blank, create a new item for each position in current_positions\n  return current_positions.map(position => ({\n    position_to_check: position,\n    ...item\n  }));\n}\n\n// Process all items from the previous node\nconst outputItems = items.flatMap(inputItem => processItem(inputItem.json));\n\n// Return the output items with the new column \"position_to_check\"\nreturn outputItems.map(outputItem => ({ json: outputItem }));"
+      },
+      "id": "0082bcd3-a45b-464f-8338-20a68490b141",
+      "name": "Find current positions1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        -1380,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the outputs of the previous nodes\nconst currentPositionData = $items(\"Find current positions1\").map(item => item.json);\nconst httpPostData = items.map(item => item.json);\n\n// Merge the outputs\nconst mergedData = currentPositionData.map((item, index) => {\n  return {\n    ...item,\n    ...httpPostData[index]\n  };\n});\n\n// Set the merged data as the output of the Function node\nreturn mergedData.map(item => ({ json: item }));"
+      },
+      "id": "ea48a274-107a-4830-93b9-638b6f6f1598",
+      "name": "Combine people and company columns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        -900,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// This function extracts the domain from a given URL. It uses a regular expression to match the domain and returns it.\nfunction extractDomain(url) {\n  try {\n    const match = url.match(/^(?:https?:\\/\\/)?(?:www\\.)?([^\\/]+)/i); // Regular expression to match the domain\n    const domain = match && match[1] ? match[1] : null; // Get the domain from the matched string, or return null if it didn't match\n    return domain;\n  } catch (error) {\n    return null; // If there's an error, return null\n  }\n}\n\nconst outputItems = []; // Create an empty array to hold the output items\n\n// Loop through each item in the input 'items' array\nfor (const item of items) {\n  const url = item.json.website; // Access the 'website' field from the previous node's items\n  const domain = extractDomain(url); // Call the 'extractDomain' function to get the domain from the URL\n  \n  // If the 'domain' is not empty, add it to the 'item.json' object and push the 'item' to the 'outputItems' array\n  if (domain) {\n    item.json = { domain, ...item.json }; // Add the 'domain' to the 'item.json' object using spread syntax\n    outputItems.push(item); // Push the 'item' to the 'outputItems' array\n  }\n}\n\nreturn outputItems; // Return the 'outputItems' array as the output of the Function node"
+      },
+      "id": "0c030d9e-5b73-4de4-9822-2f540b7e0487",
+      "name": "Extract domain",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "emailFinder",
+        "domain": "={{ $json.domain }}",
+        "firstname": "={{ $json.first_name }}",
+        "lastname": "={{ $json.last_name }}"
+      },
+      "id": "5f04b545-0b5c-448c-bcc8-b833455ae8cf",
+      "name": "Find email1",
+      "type": "n8n-nodes-base.hunter",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -20
+      ],
+      "credentials": {
+        "hunterApi": {
+          "id": "5",
+          "name": "Hunter account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b7db614e-2fd0-474a-a6bb-30d11a8d1774",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.apollo.io/v1/people/match",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "api_key",
+              "value": "=G0BT0pncA0H_gSc_3MgIPg"
+            },
+            {
+              "name": "first_name",
+              "value": "={{ $node[\"Find more\"].json.first_name }}"
+            },
+            {
+              "name": "last_name",
+              "value": "={{ $node[\"Find more\"].json.last_name }}"
+            },
+            {
+              "name": "domain",
+              "value": "={{ $node[\"Find more\"].json.domain }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "67726825-f925-450a-836e-940bb1f5f68c",
+      "name": "Find email using Apollo2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        300,
+        -320
+      ],
+      "executeOnce": false,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://api.airtable.com/v0/apph8yQ5fO6T5cwkS/Apollo%20Credits",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "airtableApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filterByFormula",
+              "value": "{error} = \"\""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "91507eec-860d-420f-9ae3-54884f45e45a",
+      "name": "Get Apollo credits table2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        120,
+        -600
+      ],
+      "alwaysOutputData": false,
+      "credentials": {
+        "airtableApi": {
+          "id": "4",
+          "name": "Airtable account 2"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.email }}",
+              "operation": "isEmpty"
+            }
+          ]
+        }
+      },
+      "id": "6011aab2-44f2-4fd1-b089-73f5f402ab4d",
+      "name": "Find more",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -180
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "email",
+              "value": "={{ $json.person.email }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b357ccc8-3de6-4dd2-864f-658dafbb4913",
+      "name": "Set3",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        780,
+        -320
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.email }}",
+              "operation": "isEmpty"
+            }
+          ]
+        }
+      },
+      "id": "11f051a9-68be-4640-bf88-1141283badfd",
+      "name": "Find more1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        -320
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {},
+      "id": "9d2516bd-63dc-4f8f-a824-fbe53df5b935",
+      "name": "Merge2",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        620
+      ],
+      "alwaysOutputData": true,
+      "notesInFlow": true,
+      "notes": "test"
+    },
+    {
+      "parameters": {
+        "jsCode": "const findEmail1Items = $items(\"Find email1\");\nconst set3Items = $items(\"Set3\");\nconst proxycurlPersonItems = $items(\"Proxycurl for person\");\nconst proxycurlCompanyItems = $items(\"Proxycurl for company\");\n\nconst nonEmptyEmailItemsHunter = findEmail1Items.filter(item => item.json.email && item.json.email !== \"\");\nconst nonEmptyEmailItemsApollo = set3Items.filter(item => item.json.email && item.json.email !== \"\");\n\nconst proxycurlSum = proxycurlPersonItems.length + proxycurlCompanyItems.length;\n\nconst output = {\n  hunter: nonEmptyEmailItemsHunter.length,\n  apollo: nonEmptyEmailItemsApollo.length,\n  Proxycurl: proxycurlSum\n};\n\nreturn [{ json: { results: JSON.stringify(output) } }];"
+      },
+      "id": "9d029fb5-9d76-4993-a472-240f95745028",
+      "name": "Count usage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        -600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Initialize an empty array to hold the processed items\nconst processedItems = [];\n\n// Loop through each input item\nfor (const inputItem of items) {\n  // Get the JSON data from the current input item\n  const inputData = inputItem.json;\n\n  // Create a new item without the \"people\" column\n  const newItem = { ...inputData };\n  delete newItem['person'];\n\n  // Add the new item to the processedItems array\n  processedItems.push({ json: newItem });\n}\n\n// Return the processed items\nreturn processedItems;"
+      },
+      "id": "4b4538ff-f910-4131-b8d8-aecb048caa7e",
+      "name": "Remove person column",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        -320
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the input object from the first input item\nconst inputObject = items[0].json;\n\n// Initialize an empty array to hold the individual items\nconst individualItems = [];\n\n// Get the number of items based on the length of the first column's array\nconst numberOfItems = inputObject[Object.keys(inputObject)[0]].length;\n\n// Create items based on the array values for each column\nfor (let i = 0; i < numberOfItems; i++) {\n  const newItem = { json: {} };\n\n  // Loop through each key in the input object\n  for (const key in inputObject) {\n    newItem.json[key] = inputObject[key][i];\n  }\n\n  // Add the new item to the individualItems array\n  individualItems.push(newItem);\n}\n\n// Return the individual items\nreturn individualItems;"
+      },
+      "id": "70947ae1-f790-4808-9f7a-b057ead4379c",
+      "name": "Break up output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2760,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const currentPositionData = $items(\"Find more\").map(item => item.json);\nconst httpPostData = items.map(item => item.json);\n\n// Merge the outputs\nconst mergedData = currentPositionData.map((item, index) => {\n  const mergedItem = { ...httpPostData[index] };\n\n  // Use the values from Extract domain node for common properties\n  Object.keys(item).forEach(key => {\n    if (mergedItem.hasOwnProperty(key)) {\n      mergedItem[key] = item[key];\n    } else {\n      mergedItem[key] = item[key];\n    }\n  });\n\n  return mergedItem;\n});\n\n// Set the merged data as the output of the Function node\nreturn mergedData.map(item => ({ json: item }));"
+      },
+      "id": "a4d91d21-a01f-47ca-bcca-737a6c87f562",
+      "name": "Combine Apollo results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        560,
+        -320
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the outputs of the previous nodes\nconst currentPositionData = $items(\"Extract domain\").map(item => item.json);\nconst httpPostData = items.map(item => item.json);\n\n// Merge the outputs\nconst mergedData = currentPositionData.map((item, index) => {\n  const mergedItem = { ...httpPostData[index] };\n\n  // Use the values from Extract domain node for common properties\n  Object.keys(item).forEach(key => {\n    if (mergedItem.hasOwnProperty(key)) {\n      mergedItem[key] = item[key];\n    } else {\n      mergedItem[key] = item[key];\n    }\n  });\n\n  return mergedItem;\n});\n\n// Set the merged data as the output of the Function node\nreturn mergedData.map(item => ({ json: item }));"
+      },
+      "id": "f00cf2a2-d0e9-48c3-89e9-b37d91e7fc0a",
+      "name": "Combine hunter results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        -260,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Initialize an empty object to hold the grouped data\nconst groupedData = {};\n\n// Loop through each item in the input\nfor (const item of items) {\n  // Get the JSON data for the current item\n  const data = item.json;\n\n  // Loop through each key-value pair in the data\n  for (const key in data) {\n    // If the key is not already in the groupedData object, initialize it as an empty array\n    if (!groupedData.hasOwnProperty(key)) {\n      groupedData[key] = [];\n    }\n\n    // Add the value to the corresponding key's array in the groupedData object\n    groupedData[key].push(data[key]);\n  }\n}\n\n// Return the groupedData as a new item\nreturn [{ json: groupedData }];"
+      },
+      "id": "c6d16d12-49a9-4c89-9a5c-970703d1c55d",
+      "name": "Condense results into Object",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Initialize an empty array to hold the items' data\nconst itemsArray = [];\n\n// Loop through each item in the input\nfor (const item of items) {\n  // Get the JSON data for the current item\n  const data = item.json;\n\n  // Add the data to the itemsArray\n  itemsArray.push(data);\n}\n\n// Return the itemsArray as a new item\nreturn [{ json: { items: itemsArray } }];"
+      },
+      "id": "a6ac03c7-46aa-4b53-b5ec-8f50b3bafe6e",
+      "name": "Turn results into array",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1860,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.linkedin",
+        "options": {}
+      },
+      "id": "327e8828-9e76-471c-ab80-68bb07e05fee",
+      "name": "Split items",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 2,
+      "position": [
+        -2120,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// First initialize an array to store your final results\nlet outputItems = [];\n\n// Loop through each item in the incoming 'items' array\nfor (const item of items) {\n    // Create a new object for each item\n    let newItem = {};\n    \n    // Loop through each key-value pair in the item's 'json' object\n    for (const [key, value] of Object.entries(item.json)) {\n        // Directly assign the value to the corresponding key in the newItem\n        newItem[key] = value;\n    }\n    \n    // Push the newItem into the outputItems array\n    outputItems.push(newItem);\n}\n\n// Wrap each item's json object in an object and return the array\nreturn outputItems.map(item => ({json: item}));\n"
+      },
+      "id": "e7279655-0153-46eb-8bf8-31e8431b9092",
+      "name": "Merge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the input_type value from the Webhook node\nconst inputType = $node[\"Webhook\"].json[\"body\"][\"fields_returned\"];\n\n// Define fields to remove when inputType is 'basic'\nconst fieldsToRemove = [\n  \"experiences\",\n  \"people_also_viewed\",\n  \"activities\",\n  \"recommendations\",\n  \"similarly_named_profiles\",\n  \"similar_companies\"\n];\n\n// Process the input data from the previous node based on the inputType value\nconst processedData = items.map(item => {\n  const data = item.json;\n  if (inputType === \"basic\") {\n    fieldsToRemove.forEach(field => {\n      if (data.hasOwnProperty(field)) {\n        delete data[field];\n      }\n    });\n  }\n  return { json: data };\n});\n\n// Return the processed data as items\nreturn processedData;\n"
+      },
+      "id": "ab2ea9e7-eb8f-417b-8e16-a983bc59b969",
+      "name": "Filter fields based on input_fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1620,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create an empty object to hold the merged data\nlet mergedData = {};\n\n// Loop through each item in the incoming 'items' array\nfor (const item of items) {\n  // Loop through each key-value pair in the item's 'json' object\n  for (const [key, value] of Object.entries(item.json)) {\n    // If the key doesn't exist in the 'mergedData' object, create it and set the value to an empty array\n    if (!mergedData.hasOwnProperty(key)) {\n      mergedData[key] = [];\n    }\n    \n    // Add the value to the corresponding array in the 'mergedData' object\n    mergedData[key].push(value);\n  }\n}\n\n// Return a new item with the merged data as its 'json' object\nreturn [{ json: mergedData }];"
+      },
+      "id": "032b08bd-2d82-4252-adde-af63a278329e",
+      "name": "Merge1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1480,
+        540
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Split items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proxycurl for person": {
+      "main": [
+        [
+          {
+            "node": "Find current positions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find current positions": {
+      "main": [
+        [
+          {
+            "node": "Find current positions1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find current positions1": {
+      "main": [
+        [
+          {
+            "node": "Proxycurl for company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proxycurl for company": {
+      "main": [
+        [
+          {
+            "node": "Combine people and company columns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine people and company columns": {
+      "main": [
+        [
+          {
+            "node": "Extract domain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract domain": {
+      "main": [
+        [
+          {
+            "node": "Find email1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find email1": {
+      "main": [
+        [
+          {
+            "node": "Combine hunter results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find email using Apollo2": {
+      "main": [
+        [
+          {
+            "node": "Combine Apollo results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find more": {
+      "main": [
+        [
+          {
+            "node": "Find email using Apollo2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set3": {
+      "main": [
+        [
+          {
+            "node": "Remove person column",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove person column": {
+      "main": [
+        [
+          {
+            "node": "Find more1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Apollo results": {
+      "main": [
+        [
+          {
+            "node": "Set3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine hunter results": {
+      "main": [
+        [
+          {
+            "node": "Find more",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Turn results into array": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split items": {
+      "main": [
+        [
+          {
+            "node": "Proxycurl for person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find more1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Filter fields based on input_fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter fields based on input_fields": {
+      "main": [
+        [
+          {
+            "node": "Turn results into array",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "d6c87326-4739-4213-a5bf-136cdfcbed20",
+  "id": "44",
+  "meta": {
+    "instanceId": "4355b0fd08843cf7646fd159e4feb10dfb058a862ae81503b00a302768970815"
+  },
+  "tags": [
+    {
+      "createdAt": "2023-04-24T14:42:07.488Z",
+      "updatedAt": "2023-04-24T14:42:07.488Z",
+      "id": "12",
+      "name": "API"
+    },
+    {
+      "createdAt": "2023-05-18T19:11:54.957Z",
+      "updatedAt": "2023-05-19T15:53:31.263Z",
+      "id": "14",
+      "name": "Hyperscale 2.0"
+    }
+  ]
+}
